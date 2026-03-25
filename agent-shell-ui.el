@@ -57,6 +57,28 @@ NAMESPACE-ID, BLOCK-ID, LABEL-LEFT, LABEL-RIGHT, and BODY are the keys."
                        text)
   (insert text))
 
+(defmacro agent-shell-ui-with-stable-view (&rest body)
+  "Execute BODY preserving the current view.
+Saves point and window-starts as integers (not markers) to avoid
+marker clamping when block content is deleted and reinserted during
+streaming updates.  If point was at end-of-buffer, auto-scrolls
+to follow new content instead."
+  `(let ((saved-pt--wsv (point))
+         (auto-scroll--wsv (eobp))
+         (win-starts--wsv (mapcar (lambda (w) (cons w (window-start w)))
+                                  (get-buffer-window-list (current-buffer) nil t))))
+     (prog1 (progn ,@body)
+       (if auto-scroll--wsv
+           (goto-char (point-max))
+         (when (<= saved-pt--wsv (point-max))
+           (goto-char saved-pt--wsv))
+         (dolist (entry win-starts--wsv)
+           (let ((win (car entry))
+                 (pos (cdr entry)))
+             (when (and (window-live-p win)
+                        (<= pos (point-max)))
+               (set-window-start win pos t))))))))
+
 (cl-defun agent-shell-ui-update-fragment (model &key append create-new on-post-process navigation expanded no-undo)
   "Update or add a fragment using MODEL.
 
@@ -70,7 +92,7 @@ When EXPANDED is non-nil, body will be expanded by default.
 When NO-UNDO is non-nil, disable undo recording for this operation.
 
 For existing blocks, the current expansion state is preserved unless overridden."
-  (save-mark-and-excursion
+  (agent-shell-ui-with-stable-view
     (let* ((inhibit-read-only t)
            (buffer-undo-list (if no-undo t buffer-undo-list))
            (namespace-id (map-elt model :namespace-id))
